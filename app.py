@@ -1,34 +1,25 @@
 import sys
 import os
-import streamlit as st
-import pandas as pd
-import joblib
-from utils import engineer_features
 
 # Ensure Python can find the 'scripts' folder
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 sys.path.append(os.path.join(current_dir, 'scripts'))
 
+import streamlit as st
+import pandas as pd
+import joblib
+from utils import engineer_features
+
 st.set_page_config(page_title="Racing AI Dashboard", layout="wide")
 
 st.title("🏇 AI Race Predictor Dashboard")
 st.sidebar.header("Settings")
 
-# --- 1. SAFE MODEL LOADER ---
+# Load Model
 @st.cache_resource
 def load_model():
-    """Checks both root and models directory for the shrunken brain file"""
-    root_path = 'race_predictor.pkl'
-    folder_path = os.path.join('models', 'race_predictor.pkl')
-    
-    if os.path.exists(root_path):
-        return joblib.load(root_path)
-    elif os.path.exists(folder_path):
-        return joblib.load(folder_path)
-    else:
-        # Final fallback
-        return joblib.load('models/race_predictor.pkl')
+    return joblib.load('models/race_predictor.pkl')
 
 try:
     model = load_model()
@@ -45,15 +36,13 @@ st.sidebar.markdown("### 1. Load Data")
 if 'df' not in st.session_state:
     st.session_state['df'] = None
 
-# File Upload 
+# File Upload (Supports CSV and Excel formats with automatic safety fallbacks)
 uploaded_file = st.sidebar.file_uploader("Upload Daily Race Card", type=["csv", "xlsx", "xls"])
 if uploaded_file:
     try:
-        # Check if Excel
         if uploaded_file.name.lower().endswith(('.xlsx', '.xls')):
             st.session_state['df'] = pd.read_excel(uploaded_file)
             st.sidebar.success("✅ Excel loaded successfully!")
-        # Otherwise handle as CSV with a robust fallback system
         else:
             try:
                 st.session_state['df'] = pd.read_csv(uploaded_file, encoding='utf-8')
@@ -82,10 +71,10 @@ if st.session_state['df'] is not None:
     st.sidebar.markdown("---")
     st.sidebar.header("Race Filters")
     
-    # Dynamically identifies matching columns if headers vary across files
-    COURSE_COL = next((c for c in ['race_course', 'course', 'track', 'venue', 'course_name'] if c in df.columns), 'race_course')
-    TIME_COL = next((t for t in ['race_off_time', 'time', 'off_time', 'race_time'] if t in df.columns), 'race_off_time')
-    RUNNER_COL = next((r for r in ['runner_horse', 'horse', 'horse_name', 'runner'] if r in df.columns), 'runner_horse')
+    # FIX: Dynamically identifies matching columns even if header casing or names vary slightly across spreadsheets
+    COURSE_COL = next((c for c in df.columns if c.lower() in ['race_course', 'course', 'track', 'venue', 'course_name']), 'race_course')
+    TIME_COL = next((t for t in df.columns if t.lower() in ['race_off_time', 'time', 'off_time', 'race_time', 'off']), 'race_off_time')
+    RUNNER_COL = next((r for r in df.columns if r.lower() in ['runner_horse', 'horse', 'horse_name', 'runner']), 'runner_horse')
     
     # Course Filter
     if COURSE_COL in df.columns:
