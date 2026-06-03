@@ -2,25 +2,25 @@ import sys
 import os
 import requests
 import io
-import streamlit as st
-import pandas as pd
-import joblib
-from utils import engineer_features
 
 # Ensure Python can find the 'scripts' folder
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 sys.path.append(os.path.join(current_dir, 'scripts'))
 
+import streamlit as st
+import pandas as pd
+import joblib
+from utils import engineer_features
+
 st.set_page_config(page_title="Racing AI Dashboard", layout="wide")
 
 st.title("🏇 AI Race Predictor Dashboard")
 st.sidebar.header("Settings")
 
-# --- 1. SAFE MODEL LOADER ---
+# Load Model (Checks both root and models folder)
 @st.cache_resource
 def load_model():
-    """Checks both root and models directory for the shrunken brain file"""
     root_path = 'race_predictor.pkl'
     folder_path = os.path.join('models', 'race_predictor.pkl')
     
@@ -29,7 +29,7 @@ def load_model():
     elif os.path.exists(folder_path):
         return joblib.load(folder_path)
     else:
-        raise FileNotFoundError("Could not find race_predictor.pkl in root or models/ folder.")
+        return joblib.load('models/race_predictor.pkl')
 
 try:
     model = load_model()
@@ -66,7 +66,7 @@ if st.sidebar.button("📡 Fetch Today's Cards (API)"):
         except Exception as e:
             st.sidebar.error(f"❌ Connection Error: {e}")
 
-# Option B: File Upload (Fallback)
+# Option B: File Upload (Fallback with Excel + Unicode safety)
 uploaded_file = st.sidebar.file_uploader("Or Upload Data (Fallback)", type=["csv", "xlsx", "xls"])
 if uploaded_file:
     try:
@@ -101,10 +101,10 @@ if st.session_state['df'] is not None:
     st.sidebar.markdown("---")
     st.sidebar.header("Race Filters")
     
-    # FIX: Dynamically identifies matching columns if headers vary across files
+    # FIX: Dynamically scans for column name variations across data formats
     COURSE_COL = next((c for c in ['race_course', 'course', 'track', 'venue', 'course_name'] if c in df.columns), 'race_course')
     TIME_COL = next((t for t in ['race_off_time', 'time', 'off_time', 'race_time'] if t in df.columns), 'race_off_time')
-    HORSE_COL = next((h for h in ['runner_horse', 'horse', 'horse_name', 'runner'] if h in df.columns), 'runner_horse')
+    RUNNER_COL = next((r for r in ['runner_horse', 'horse', 'horse_name', 'runner'] if r in df.columns), 'runner_horse')
     
     # Course Filter
     if COURSE_COL in df.columns:
@@ -141,13 +141,13 @@ if st.session_state['df'] is not None:
         
     st.write(f"### {display_title} (Confidence > {threshold:.2f})")
     
-    display_cols = [HORSE_COL, 'win_probability']
+    display_cols = [RUNNER_COL, 'win_probability']
     if COURSE_COL in df.columns: display_cols.insert(0, COURSE_COL)
     if TIME_COL in df.columns: display_cols.insert(1, TIME_COL)
     
     if not results.empty:
         rename_map = {
-            HORSE_COL: 'Horse',
+            RUNNER_COL: 'Horse',
             'win_probability': 'Win Probability',
             COURSE_COL: 'Course',
             TIME_COL: 'Time'
@@ -156,7 +156,7 @@ if st.session_state['df'] is not None:
         display_df['Win Probability'] = (display_df['Win Probability'] * 100).round(1).astype(str) + '%'
         
         st.dataframe(display_df, use_container_width=True, hide_index=True)
-        st.bar_chart(results.set_index(HORSE_COL)['win_probability'])
+        st.bar_chart(results.set_index(RUNNER_COL)['win_probability'])
     else:
         st.info("No horses met the confidence threshold for this specific race/course.")
 
