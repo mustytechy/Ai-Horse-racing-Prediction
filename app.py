@@ -1,136 +1,114 @@
-import sys
-import os
-
-# Ensure Python can find the 'scripts' folder
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
-sys.path.append(os.path.join(current_dir, 'scripts'))
-
 import streamlit as st
 import pandas as pd
 import joblib
+import os
 from utils import engineer_features
 
-st.set_page_config(page_title="Racing AI Dashboard", layout="wide")
+# Set page configuration
+st.set_page_config(page_title="AI Horse Racing Predictor", page_icon="🏇", layout="wide")
 
 st.title("🏇 AI Race Predictor Dashboard")
-st.sidebar.header("Settings")
+st.write("Upload your daily race cards below to let the AI scan for potential winners.")
 
-# Load Model
+# --- 1. SAFE MODEL LOADER ---
 @st.cache_resource
-def load_model():
-    return joblib.load('race_predictor.pkl')
+def load_prediction_model():
+    """Loads the model file once and caches it to keep the app lightning fast."""
+    # Check root directory first (based on your recent GitHub upload)
+    root_path = 'race_predictor.pkl'
+    folder_path = os.path.join('models', 'race_predictor.pkl')
+    
+    if os.path.exists(root_path):
+        return joblib.load(root_path)
+    elif os.path.exists(folder_path):
+        return joblib.load(folder_path)
+    return None
 
-try:
-    model = load_model()
-except Exception as e:
-    st.error("Could not load the model. Have you run `train_model.py` yet?")
-    st.stop()
+model = load_prediction_model()
 
-# 1. Update the uploader to accept both formats
-uploaded_file = st.file_uploader("Upload your daily race data", type=["csv", "xlsx"])
+# Show status of the AI engine
+if model is None:
+    st.error("❌ Error: Could not load the model file ('race_predictor.pkl'). Please check your GitHub repository structure.")
+    st.stop()  # Stop the app right here if the model is missing
+else:
+    st.sidebar.success("🤖 AI Model Engine: Active & Loaded")
+
+# --- 2. ROBUST FILE UPLOADER ---
+uploaded_file = st.file_uploader("Upload Daily Race Card (CSV or Excel format)", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
-    # 2. Check the file extension and use the correct pandas reader
-    if uploaded_file.name.endswith('.xlsx'):
-        df = pd.read_excel(uploaded_file)
-    else:
-        df = pd.read_csv(uploaded_file)
-        
-    st.success("File successfully loaded!")
-# Threshold Slider
-threshold = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.55)
-
-if uploaded_file:
-    # Read the data
-    df = pd.read_csv(uploaded_file)
-    
-    # Process and Predict for the whole file
-    X = engineer_features(df)
-    features = ['or', 'wgt', 'jockey_win_rate', 'days_since_run']
-    df['win_probability'] = model.predict_proba(X[features])[:, 1]
-    
-    # ---------------------------------------------------------
-    # DYNAMIC FILTERING LOGIC
-    # ---------------------------------------------------------
-    st.sidebar.markdown("---")
-    st.sidebar.header("Race Filters")
-    
-    # Updated to your exact CSV column names
-    COURSE_COL = 'race_course'  
-    TIME_COL = 'race_off_time'      
-    
-    # 1. Course Filter
-    if COURSE_COL in df.columns:
-        courses = ["All Courses"] + sorted(df[COURSE_COL].dropna().unique().tolist())
-        selected_course = st.sidebar.selectbox("Select Course", courses)
-    else:
-        selected_course = "All Courses"
-        st.sidebar.warning(f"Column '{COURSE_COL}' not found in CSV. Filters disabled.")
-
-    # 2. Time Filter (Dynamically updates based on selected course)
-    if TIME_COL in df.columns:
-        if selected_course != "All Courses":
-            available_times = sorted(df[df[COURSE_COL] == selected_course][TIME_COL].dropna().unique().tolist())
-        else:
-            available_times = sorted(df[TIME_COL].dropna().unique().tolist())
+    try:
+        # Step A: Handle Excel files
+        if uploaded_file.name.lower().endswith(('.xlsx', '.xls')):
+            df = pd.read_excel(uploaded_file)
+            st.success("📊 Excel file successfully loaded!")
             
-        times = ["All Times"] + available_times
-        selected_time = st.sidebar.selectbox("Select Time", times)
-    else:
-        selected_time = "All Times"
+        # Step B: Handle CSV files with Unicode safety fallback
+        else:
+            try:
+                df = pd.read_csv(uploaded_file, encoding='utf-8')
+            except UnicodeDecodeError:
+                uploaded_file.seek(0)  # Rewind the file pointer to the start
+                df = pd.read_csv(uploaded_file, encoding='latin1')
+            st.success("📊 CSV file successfully loaded!")
 
-    # ---------------------------------------------------------
-    # APPLY FILTERS & DISPLAY RESULTS
-    # ---------------------------------------------------------
-    
-    # Filter by Threshold first
-    results = df[df['win_probability'] >= threshold]
-    
-    # Apply Course and Time filters
-    if selected_course != "All Courses":
-        results = results[results[COURSE_COL] == selected_course]
-    if selected_time != "All Times":
-        results = results[results[TIME_COL] == selected_time]
+        # --- 3. FEATURE ENGINEERING & PREDICTIONS ---
+        st.write("---")
+        st.subheader("🔮 Processing Predictions")
         
-    # Sort the highest probability to the top
-    results = results.sort_values('win_probability', ascending=False)
-    
-    # Header update based on selection
-    display_title = f"Predictions ({selected_course} at {selected_time})" 
-    if selected_course == "All Courses" and selected_time == "All Times":
-        display_title = "Overall Top Picks"
+        with st.spinner("Analyzing past form and engineering features..."):
+            # Call your function from utils.py
+            df_features = engineer_features(df)
         
-    st.write(f"### {display_title} (Confidence > {threshold:.2f})")
-    
-    # Build the display columns dynamically
-    display_cols = ['runner_horse', 'win_probability']
-    if COURSE_COL in df.columns: display_cols.insert(0, COURSE_COL)
-    if TIME_COL in df.columns: display_cols.insert(1, TIME_COL)
-    
-    if not results.empty:
-        # --- NEW CLEAN FORMATTING ---
-        # Map the old ugly names to clean, capitalized names
-        rename_map = {
-            'runner_horse': 'Horse',
-            'win_probability': 'Win Probability',
-            COURSE_COL: 'Course',
-            TIME_COL: 'Time'
-        }
-        
-        # Create a display-only dataframe with the new names
-        display_df = results[display_cols].rename(columns=rename_map)
-        
-        # Format probability as a clean percentage
-        display_df['Win Probability'] = (display_df['Win Probability'] * 100).round(1).astype(str) + '%'
-        
-        # Show the clean dataframe
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
-        
-        # Keep the bar chart working with the original numeric data
-        st.bar_chart(results.set_index('runner_horse')['win_probability'])
-    else:
-        st.info("No horses met the confidence threshold for this specific race/course.")
+        with st.spinner("Running predictive models..."):
+            # Automatically align columns with what the scikit-learn model expects
+            if hasattr(model, 'feature_names_in_'):
+                X = df_features[model.feature_names_in_]
+            else:
+                X = df_features
+                
+            # Generate predictions (0 = No Win, 1 = Predicted Winner)
+            predictions = model.predict(X)
+            
+            # Extract win probabilities if the model supports it
+            if hasattr(model, 'predict_proba'):
+                probabilities = model.predict_proba(X)[:, 1]
+            else:
+                probabilities = None
 
-else:
-    st.info("Please upload a racecard CSV file in the sidebar to begin.")
+        # Append outcomes back onto the original readable dataframe
+        df['AI_Predicted_Winner'] = predictions
+        if probabilities is not None:
+            df['Win_Confidence'] = [f"{p*100:.1f}%" for p in probabilities]
+
+        # --- 4. DISPLAY RESULTS ---
+        st.subheader("🏁 Prediction Results Table")
+        st.write("Use the controls below to filter down to the AI's top picks.")
+        
+        # Interactive UI Filter
+        winners_only = st.checkbox("🎯 Show AI Predicted Winners Only", value=False)
+        
+        display_df = df.copy()
+        if winners_only:
+            # Filter rows where the model outputted a '1'
+            display_df = display_df[display_df['AI_Predicted_Winner'] == 1]
+            
+        if display_df.empty:
+            st.warning("No horses were flagged as outright winners based on your current filter criteria.")
+        else:
+            # Interactive Streamlit data grid
+            st.dataframe(display_df, use_container_width=True)
+            
+        # --- 5. EXPORT RESULTS ---
+        st.write("---")
+        csv_data = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Output Predictions to CSV",
+            data=csv_data,
+            file_name="daily_race_predictions.csv",
+            mime="text/csv"
+        )
+
+    except Exception as e:
+        st.error(f"⚠️ A processing error occurred: {e}")
+        st.info("Tip: Double check that the uploaded spreadsheet columns perfectly match the format your model was trained on.")
