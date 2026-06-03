@@ -2,26 +2,34 @@ import sys
 import os
 import requests
 import io
+import streamlit as st
+import pandas as pd
+import joblib
+from utils import engineer_features
 
 # Ensure Python can find the 'scripts' folder
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 sys.path.append(os.path.join(current_dir, 'scripts'))
 
-import streamlit as st
-import pandas as pd
-import joblib
-from utils import engineer_features
-
 st.set_page_config(page_title="Racing AI Dashboard", layout="wide")
 
 st.title("🏇 AI Race Predictor Dashboard")
 st.sidebar.header("Settings")
 
-# Load Model
+# --- 1. SAFE MODEL LOADER (UPDATED FIX) ---
 @st.cache_resource
 def load_model():
-    return joblib.load('models/race_predictor.pkl')
+    """Checks both root and models directory for the shrunken brain file"""
+    root_path = 'race_predictor.pkl'
+    folder_path = os.path.join('models', 'race_predictor.pkl')
+    
+    if os.path.exists(root_path):
+        return joblib.load(root_path)
+    elif os.path.exists(folder_path):
+        return joblib.load(folder_path)
+    else:
+        raise FileNotFoundError("Could not find race_predictor.pkl in root or models/ folder.")
 
 try:
     model = load_model()
@@ -42,8 +50,6 @@ if 'df' not in st.session_state:
 if st.sidebar.button("📡 Fetch Today's Cards (API)"):
     with st.spinner("Connecting to The Racing API..."):
         try:
-            # Replace with the exact endpoint URL from your API documentation
-            # Often, APIs allow you to request CSV format by adding ?format=csv to the URL
             api_url = "https://api.theracingapi.com/v1/racecards/pro?format=csv" 
             
             response = requests.get(
@@ -52,7 +58,6 @@ if st.sidebar.button("📡 Fetch Today's Cards (API)"):
             )
             
             if response.status_code == 200:
-                # Read the response text as a CSV into pandas
                 st.session_state['df'] = pd.read_csv(io.StringIO(response.text))
                 st.sidebar.success("✅ API Data loaded successfully!")
             else:
@@ -61,11 +66,24 @@ if st.sidebar.button("📡 Fetch Today's Cards (API)"):
         except Exception as e:
             st.sidebar.error(f"❌ Connection Error: {e}")
 
-# Option B: File Upload (Fallback)
-uploaded_file = st.sidebar.file_uploader("Or Upload CSV (Fallback)", type="csv")
+# Option B: File Upload (Fallback) (UPDATED FIX FOR EXCEL & UNICODE DECODE ERRORS)
+uploaded_file = st.sidebar.file_uploader("Or Upload Data (Fallback)", type=["csv", "xlsx", "xls"])
 if uploaded_file:
-    st.session_state['df'] = pd.read_csv(uploaded_file)
-    st.sidebar.success("✅ CSV loaded successfully!")
+    try:
+        # Check if Excel
+        if uploaded_file.name.lower().endswith(('.xlsx', '.xls')):
+            st.session_state['df'] = pd.read_excel(uploaded_file)
+            st.sidebar.success("✅ Excel loaded successfully!")
+        # Otherwise handle as CSV with a robust fallback system
+        else:
+            try:
+                st.session_state['df'] = pd.read_csv(uploaded_file, encoding='utf-8')
+            except UnicodeDecodeError:
+                uploaded_file.seek(0)  # Rewind file pointer
+                st.session_state['df'] = pd.read_csv(uploaded_file, encoding='latin1')
+            st.sidebar.success("✅ CSV loaded successfully!")
+    except Exception as e:
+        st.sidebar.error(f"❌ File Processing Error: {e}")
 
 # ---------------------------------------------------------
 # PREDICTION & FILTERING (Only runs if data is loaded)
