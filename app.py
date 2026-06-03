@@ -1,26 +1,24 @@
 import sys
 import os
-import requests
-import io
+import streamlit as st
+import pandas as pd
+import joblib
+from utils import engineer_features
 
 # Ensure Python can find the 'scripts' folder
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 sys.path.append(os.path.join(current_dir, 'scripts'))
 
-import streamlit as st
-import pandas as pd
-import joblib
-from utils import engineer_features
-
 st.set_page_config(page_title="Racing AI Dashboard", layout="wide")
 
 st.title("🏇 AI Race Predictor Dashboard")
 st.sidebar.header("Settings")
 
-# Load Model (Checks both root and models folder)
+# --- 1. SAFE MODEL LOADER ---
 @st.cache_resource
 def load_model():
+    """Checks both root and models directory for the shrunken brain file"""
     root_path = 'race_predictor.pkl'
     folder_path = os.path.join('models', 'race_predictor.pkl')
     
@@ -29,6 +27,7 @@ def load_model():
     elif os.path.exists(folder_path):
         return joblib.load(folder_path)
     else:
+        # Final fallback
         return joblib.load('models/race_predictor.pkl')
 
 try:
@@ -38,7 +37,7 @@ except Exception as e:
     st.stop()
 
 # ---------------------------------------------------------
-# DATA SOURCE LOGIC (API + FALLBACK)
+# DATA SOURCE LOGIC (FILE UPLOAD ONLY)
 # ---------------------------------------------------------
 st.sidebar.markdown("### 1. Load Data")
 
@@ -46,38 +45,20 @@ st.sidebar.markdown("### 1. Load Data")
 if 'df' not in st.session_state:
     st.session_state['df'] = None
 
-# Option A: API Fetch
-if st.sidebar.button("📡 Fetch Today's Cards (API)"):
-    with st.spinner("Connecting to The Racing API..."):
-        try:
-            api_url = "https://api.theracingapi.com/v1/racecards/pro?format=csv" 
-            
-            response = requests.get(
-                api_url, 
-                auth=('PjicO3P5s7worIWnolo5eN6Z', 'NMuYJpB7OJRZIjZg9w2MTos1')
-            )
-            
-            if response.status_code == 200:
-                st.session_state['df'] = pd.read_csv(io.StringIO(response.text))
-                st.sidebar.success("✅ API Data loaded successfully!")
-            else:
-                st.sidebar.error(f"❌ API Failed: Error {response.status_code}")
-                
-        except Exception as e:
-            st.sidebar.error(f"❌ Connection Error: {e}")
-
-# Option B: File Upload (Fallback with Excel + Unicode safety)
-uploaded_file = st.sidebar.file_uploader("Or Upload Data (Fallback)", type=["csv", "xlsx", "xls"])
+# File Upload 
+uploaded_file = st.sidebar.file_uploader("Upload Daily Race Card", type=["csv", "xlsx", "xls"])
 if uploaded_file:
     try:
+        # Check if Excel
         if uploaded_file.name.lower().endswith(('.xlsx', '.xls')):
             st.session_state['df'] = pd.read_excel(uploaded_file)
             st.sidebar.success("✅ Excel loaded successfully!")
+        # Otherwise handle as CSV with a robust fallback system
         else:
             try:
                 st.session_state['df'] = pd.read_csv(uploaded_file, encoding='utf-8')
             except UnicodeDecodeError:
-                uploaded_file.seek(0)
+                uploaded_file.seek(0)  # Rewind file pointer
                 st.session_state['df'] = pd.read_csv(uploaded_file, encoding='latin1')
             st.sidebar.success("✅ CSV loaded successfully!")
     except Exception as e:
@@ -101,7 +82,7 @@ if st.session_state['df'] is not None:
     st.sidebar.markdown("---")
     st.sidebar.header("Race Filters")
     
-    # FIX: Dynamically scans for column name variations across data formats
+    # Dynamically identifies matching columns if headers vary across files
     COURSE_COL = next((c for c in ['race_course', 'course', 'track', 'venue', 'course_name'] if c in df.columns), 'race_course')
     TIME_COL = next((t for t in ['race_off_time', 'time', 'off_time', 'race_time'] if t in df.columns), 'race_off_time')
     RUNNER_COL = next((r for r in ['runner_horse', 'horse', 'horse_name', 'runner'] if r in df.columns), 'runner_horse')
@@ -161,4 +142,4 @@ if st.session_state['df'] is not None:
         st.info("No horses met the confidence threshold for this specific race/course.")
 
 else:
-    st.info("👈 Please click 'Fetch API' or upload a CSV file in the sidebar to begin.")
+    st.info("👈 Please upload a daily race card file in the sidebar to begin.")
