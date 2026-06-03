@@ -19,7 +19,7 @@ st.sidebar.header("Settings")
 # Load Model
 @st.cache_resource
 def load_model():
-    return joblib.load('race_predictor.pkl')
+    return joblib.load('models/race_predictor.pkl')
 
 try:
     model = load_model()
@@ -36,22 +36,14 @@ st.sidebar.markdown("### 1. Load Data")
 if 'df' not in st.session_state:
     st.session_state['df'] = None
 
-# File Upload (Supports CSV and Excel formats with automatic safety fallbacks)
-uploaded_file = st.sidebar.file_uploader("Upload Daily Race Card", type=["csv", "xlsx", "xls"])
+# File Upload 
+uploaded_file = st.sidebar.file_uploader("Upload Daily Race Card (CSV)", type="csv")
 if uploaded_file:
     try:
-        if uploaded_file.name.lower().endswith(('.xlsx', '.xls')):
-            st.session_state['df'] = pd.read_excel(uploaded_file)
-            st.sidebar.success("✅ Excel loaded successfully!")
-        else:
-            try:
-                st.session_state['df'] = pd.read_csv(uploaded_file, encoding='utf-8')
-            except UnicodeDecodeError:
-                uploaded_file.seek(0)  # Rewind file pointer
-                st.session_state['df'] = pd.read_csv(uploaded_file, encoding='latin1')
-            st.sidebar.success("✅ CSV loaded successfully!")
+        st.session_state['df'] = pd.read_csv(uploaded_file)
+        st.sidebar.success("✅ CSV loaded successfully!")
     except Exception as e:
-        st.sidebar.error(f"❌ File Processing Error: {e}")
+        st.sidebar.error(f"❌ Error loading CSV: {e}")
 
 # ---------------------------------------------------------
 # PREDICTION & FILTERING (Only runs if data is loaded)
@@ -67,14 +59,21 @@ if st.session_state['df'] is not None:
     features = ['or', 'wgt', 'jockey_win_rate', 'days_since_run']
     df['win_probability'] = model.predict_proba(X[features])[:, 1]
     
-    # Race Filters
+    # ---------------------------------------------------------
+    # DYNAMIC COLUMN MAPPING (Prevents column-not-found errors)
+    # ---------------------------------------------------------
     st.sidebar.markdown("---")
-    st.sidebar.header("Race Filters")
+    st.sidebar.header("Race Filters Mapping")
     
-    # FIX: Dynamically identifies matching columns even if header casing or names vary slightly across spreadsheets
-    COURSE_COL = next((c for c in df.columns if c.lower() in ['race_course', 'course', 'track', 'venue', 'course_name']), 'race_course')
-    TIME_COL = next((t for t in df.columns if t.lower() in ['race_off_time', 'time', 'off_time', 'race_time', 'off']), 'race_off_time')
-    RUNNER_COL = next((r for r in df.columns if r.lower() in ['runner_horse', 'horse', 'horse_name', 'runner']), 'runner_horse')
+    # Automated smart-guess detection for header variations
+    detected_course = next((c for c in df.columns if any(k in c.lower() for k in ['course', 'track', 'venue', 'meeting'])), df.columns[0])
+    detected_time = next((t for t in df.columns if any(k in t.lower() for k in ['time', 'off_time', 'off'])), df.columns[min(1, len(df.columns)-1)])
+    detected_runner = next((r for r in df.columns if any(k in r.lower() for k in ['horse', 'runner', 'name', 'runner_horse'])), df.columns[min(2, len(df.columns)-1)])
+    
+    # Fallback selectboxes allowing you to correct column mappings dynamically if needed
+    COURSE_COL = st.sidebar.selectbox("Course Column", df.columns, index=list(df.columns).index(detected_course))
+    TIME_COL = st.sidebar.selectbox("Time Column", df.columns, index=list(df.columns).index(detected_time))
+    RUNNER_COL = st.sidebar.selectbox("Horse/Runner Column", df.columns, index=list(df.columns).index(detected_runner))
     
     # Course Filter
     if COURSE_COL in df.columns:
@@ -82,7 +81,6 @@ if st.session_state['df'] is not None:
         selected_course = st.sidebar.selectbox("Select Course", courses)
     else:
         selected_course = "All Courses"
-        st.sidebar.warning(f"Column '{COURSE_COL}' not found. Filters disabled.")
 
     # Time Filter
     if TIME_COL in df.columns:
@@ -131,4 +129,4 @@ if st.session_state['df'] is not None:
         st.info("No horses met the confidence threshold for this specific race/course.")
 
 else:
-    st.info("👈 Please upload a daily race card file in the sidebar to begin.")
+    st.info("👈 Please upload a CSV file in the sidebar to begin.")
