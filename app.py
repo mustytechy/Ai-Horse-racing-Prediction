@@ -19,7 +19,7 @@ st.sidebar.header("Settings")
 # Load Model
 @st.cache_resource
 def load_model():
-    return joblib.load('race_predictor.pkl')
+    return joblib.load('models/race_predictor.pkl')
 
 try:
     model = load_model()
@@ -61,24 +61,45 @@ if uploaded_file:
 if st.session_state['df'] is not None:
     df = st.session_state['df'].copy()
     
+    # ---------------------------------------------------------
+    # INVISIBLE DATA ALIGNMENT (Fixes feature engineering & model accuracy)
+    # ---------------------------------------------------------
+    rename_dict = {}
+    for col in df.columns:
+        normalized = str(col).strip().lower().replace(' ', '').replace('_', '')
+        if normalized in ['racecourse', 'course', 'track', 'venue', 'meeting']:
+            rename_dict[col] = 'race_course'
+        elif normalized in ['raceofftime', 'time', 'offtime', 'racetime', 'off']:
+            rename_dict[col] = 'race_off_time'
+        elif normalized in ['runnerhorse', 'horse', 'horsename', 'runner']:
+            rename_dict[col] = 'runner_horse'
+        elif normalized in ['or', 'officialrating', 'rating']:
+            rename_dict[col] = 'or'
+        elif normalized in ['wgt', 'weight']:
+            rename_dict[col] = 'wgt'
+        elif normalized in ['jockeywinrate', 'jockeywin%']:
+            rename_dict[col] = 'jockey_win_rate'
+        elif normalized in ['dayssincerun', 'dayssince']:
+            rename_dict[col] = 'days_since_run'
+            
+    # Remap headers to exact format expected by engineer_features() and the model
+    df = df.rename(columns=rename_dict)
+    
     st.sidebar.markdown("### 2. Predict")
     threshold = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.55)
     
-    # Process and Predict for the whole file
+    # Process and Predict for the whole file using aligned data
     X = engineer_features(df)
     features = ['or', 'wgt', 'jockey_win_rate', 'days_since_run']
     df['win_probability'] = model.predict_proba(X[features])[:, 1]
     
-    # ---------------------------------------------------------
-    # INVISIBLE COLUMN MAPPING (Prevents column errors silently)
-    # ---------------------------------------------------------
+    # Race Filters Setup
     st.sidebar.markdown("---")
     st.sidebar.header("Race Filters")
     
-    # Silently finds the correct columns matching standard variations (case-insensitive)
-    COURSE_COL = next((c for c in df.columns if c.lower() in ['race_course', 'course', 'track', 'venue', 'meeting', 'racecourse']), 'race_course')
-    TIME_COL = next((t for t in df.columns if t.lower() in ['race_off_time', 'time', 'off_time', 'off']), 'race_off_time')
-    RUNNER_COL = next((r for r in df.columns if r.lower() in ['runner_horse', 'horse', 'horse_name', 'runner', 'horse name']), 'runner_horse')
+    COURSE_COL = 'race_course'
+    TIME_COL = 'race_off_time'
+    RUNNER_COL = 'runner_horse'
     
     # Course Filter
     if COURSE_COL in df.columns:
@@ -86,7 +107,6 @@ if st.session_state['df'] is not None:
         selected_course = st.sidebar.selectbox("Select Course", courses)
     else:
         selected_course = "All Courses"
-        st.sidebar.warning(f"Column '{COURSE_COL}' not found. Filters disabled.")
 
     # Time Filter
     if TIME_COL in df.columns:
