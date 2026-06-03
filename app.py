@@ -19,7 +19,7 @@ st.sidebar.header("Settings")
 # Load Model
 @st.cache_resource
 def load_model():
-    return joblib.load('race_predictor.pkl')
+    return joblib.load('models/race_predictor.pkl')
 
 try:
     model = load_model()
@@ -36,14 +36,24 @@ st.sidebar.markdown("### 1. Load Data")
 if 'df' not in st.session_state:
     st.session_state['df'] = None
 
-# File Upload 
-uploaded_file = st.sidebar.file_uploader("Upload Daily Race Card (CSV)", type="csv")
+# File Upload (Restored to support CSV, XLSX, and XLS)
+uploaded_file = st.sidebar.file_uploader("Upload Daily Race Card", type=["csv", "xlsx", "xls"])
 if uploaded_file:
     try:
-        st.session_state['df'] = pd.read_csv(uploaded_file)
-        st.sidebar.success("✅ CSV loaded successfully!")
+        # Check if Excel
+        if uploaded_file.name.lower().endswith(('.xlsx', '.xls')):
+            st.session_state['df'] = pd.read_excel(uploaded_file)
+            st.sidebar.success("✅ Excel loaded successfully!")
+        # Otherwise handle as CSV with a robust fallback system
+        else:
+            try:
+                st.session_state['df'] = pd.read_csv(uploaded_file, encoding='utf-8')
+            except UnicodeDecodeError:
+                uploaded_file.seek(0)  # Rewind file pointer
+                st.session_state['df'] = pd.read_csv(uploaded_file, encoding='latin1')
+            st.sidebar.success("✅ CSV loaded successfully!")
     except Exception as e:
-        st.sidebar.error(f"❌ Error loading CSV: {e}")
+        st.sidebar.error(f"❌ File Processing Error: {e}")
 
 # ---------------------------------------------------------
 # PREDICTION & FILTERING (Only runs if data is loaded)
@@ -129,4 +139,4 @@ if st.session_state['df'] is not None:
         st.info("No horses met the confidence threshold for this specific race/course.")
 
 else:
-    st.info("👈 Please upload a CSV file in the sidebar to begin.")
+    st.info("👈 Please upload a CSV or Excel file in the sidebar to begin.")
