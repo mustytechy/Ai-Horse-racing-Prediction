@@ -19,7 +19,7 @@ st.sidebar.header("Settings")
 # Load Model
 @st.cache_resource
 def load_model():
-    return joblib.load('models/race_predictor.pkl')
+    return joblib.load('race_predictor.pkl')
 
 try:
     model = load_model()
