@@ -1,6 +1,7 @@
 import sys
 import os
 import requests
+import io
 import streamlit as st
 import pandas as pd
 import joblib
@@ -22,12 +23,6 @@ def find_col(df, keywords):
                 return col
     return None
 
-# --- Helper: Extract name from object objects ---
-def extract_name(val):
-    if isinstance(val, dict) and 'name' in val:
-        return val['name']
-    return val
-
 # Load Model
 @st.cache_resource
 def load_model():
@@ -44,6 +39,7 @@ if st.sidebar.button("📡 Fetch Today's Cards (API)"):
                                 auth=('PjicO3P5s7worIWnolo5eN6Z', 'NMuYJpB7OJRZIjZg9w2MTos1'))
         if response.status_code == 200:
             data = response.json()
+            # If JSON is nested, extract the list
             if isinstance(data, dict):
                 for k in data:
                     if isinstance(data[k], list): data = data[k]; break
@@ -63,12 +59,9 @@ if st.session_state['df'] is not None:
     COURSE_COL = find_col(df, ['course', 'track', 'meeting']) or 'race_course'
     TIME_COL = find_col(df, ['time', 'off']) or 'race_off_time'
 
-    # Apply the name extraction fix to the horse column
-    if HORSE_COL in df.columns:
-        df[HORSE_COL] = df[HORSE_COL].apply(extract_name)
-
     # Engineering and Prediction
     X = engineer_features(df)
+    # Ensure features exist, fallback to 0
     for feat in ['or', 'wgt', 'jockey_win_rate', 'days_since_run']:
         if feat not in X.columns: X[feat] = 0
         
