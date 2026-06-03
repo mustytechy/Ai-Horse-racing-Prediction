@@ -36,7 +36,7 @@ st.sidebar.markdown("### 1. Load Data")
 if 'df' not in st.session_state:
     st.session_state['df'] = None
 
-# File Upload (Restored to support CSV, XLSX, and XLS)
+# File Upload (Supports CSV, XLSX, and XLS)
 uploaded_file = st.sidebar.file_uploader("Upload Daily Race Card", type=["csv", "xlsx", "xls"])
 if uploaded_file:
     try:
@@ -70,20 +70,15 @@ if st.session_state['df'] is not None:
     df['win_probability'] = model.predict_proba(X[features])[:, 1]
     
     # ---------------------------------------------------------
-    # DYNAMIC COLUMN MAPPING (Prevents column-not-found errors)
+    # INVISIBLE COLUMN MAPPING (Prevents column errors silently)
     # ---------------------------------------------------------
     st.sidebar.markdown("---")
-    st.sidebar.header("Race Filters Mapping")
+    st.sidebar.header("Race Filters")
     
-    # Automated smart-guess detection for header variations
-    detected_course = next((c for c in df.columns if any(k in c.lower() for k in ['course', 'track', 'venue', 'meeting'])), df.columns[0])
-    detected_time = next((t for t in df.columns if any(k in t.lower() for k in ['time', 'off_time', 'off'])), df.columns[min(1, len(df.columns)-1)])
-    detected_runner = next((r for r in df.columns if any(k in r.lower() for k in ['horse', 'runner', 'name', 'runner_horse'])), df.columns[min(2, len(df.columns)-1)])
-    
-    # Fallback selectboxes allowing you to correct column mappings dynamically if needed
-    COURSE_COL = st.sidebar.selectbox("Course Column", df.columns, index=list(df.columns).index(detected_course))
-    TIME_COL = st.sidebar.selectbox("Time Column", df.columns, index=list(df.columns).index(detected_time))
-    RUNNER_COL = st.sidebar.selectbox("Horse/Runner Column", df.columns, index=list(df.columns).index(detected_runner))
+    # Silently finds the correct columns matching standard variations (case-insensitive)
+    COURSE_COL = next((c for c in df.columns if c.lower() in ['race_course', 'course', 'track', 'venue', 'meeting', 'racecourse']), 'race_course')
+    TIME_COL = next((t for t in df.columns if t.lower() in ['race_off_time', 'time', 'off_time', 'off']), 'race_off_time')
+    RUNNER_COL = next((r for r in df.columns if r.lower() in ['runner_horse', 'horse', 'horse_name', 'runner', 'horse name']), 'runner_horse')
     
     # Course Filter
     if COURSE_COL in df.columns:
@@ -91,6 +86,7 @@ if st.session_state['df'] is not None:
         selected_course = st.sidebar.selectbox("Select Course", courses)
     else:
         selected_course = "All Courses"
+        st.sidebar.warning(f"Column '{COURSE_COL}' not found. Filters disabled.")
 
     # Time Filter
     if TIME_COL in df.columns:
