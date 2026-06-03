@@ -11,148 +11,74 @@ import pandas as pd
 import joblib
 from utils import engineer_features
 
+# Configure Page
 st.set_page_config(page_title="Racing AI Dashboard", layout="wide")
-
 st.title("🏇 AI Race Predictor Dashboard")
-st.sidebar.header("Settings")
 
-# Load Model
+# 1. Load Model
 @st.cache_resource
 def load_model():
-    return joblib.load('race_predictor.pkl')
+    return joblib.load('models/race_predictor.pkl')
 
 try:
     model = load_model()
 except Exception as e:
-    st.error("Could not load the model. Have you run `train_model.py` yet?")
+    st.error(f"Error loading model: {e}")
     st.stop()
 
-# ---------------------------------------------------------
-# DATA SOURCE LOGIC (FILE UPLOAD ONLY)
-# ---------------------------------------------------------
+# 2. Define Required Features
+# IMPORTANT: These MUST match the headers in your input file exactly.
+REQUIRED_FEATURES = ['or', 'wgt', 'jockey_win_rate', 'days_since_run']
+
+# 3. File Upload
 st.sidebar.markdown("### 1. Load Data")
+uploaded_file = st.sidebar.file_uploader("Upload Daily Race Card (CSV/XLSX)", type=["csv", "xlsx", "xls"])
 
-# Initialize session state to hold our dataframe
-if 'df' not in st.session_state:
-    st.session_state['df'] = None
-
-# File Upload (Supports CSV, XLSX, and XLS)
-uploaded_file = st.sidebar.file_uploader("Upload Daily Race Card", type=["csv", "xlsx", "xls"])
 if uploaded_file:
+    # Load File
     try:
-        # Check if Excel
         if uploaded_file.name.lower().endswith(('.xlsx', '.xls')):
-            st.session_state['df'] = pd.read_excel(uploaded_file)
-            st.sidebar.success("✅ Excel loaded successfully!")
-        # Otherwise handle as CSV with a robust fallback system
+            df = pd.read_excel(uploaded_file)
         else:
-            try:
-                st.session_state['df'] = pd.read_csv(uploaded_file, encoding='utf-8')
-            except UnicodeDecodeError:
-                uploaded_file.seek(0)  # Rewind file pointer
-                st.session_state['df'] = pd.read_csv(uploaded_file, encoding='latin1')
-            st.sidebar.success("✅ CSV loaded successfully!")
+            df = pd.read_csv(uploaded_file)
+        
+        st.success("✅ File loaded successfully!")
+        
+        # 4. Data Validation (The "Make it Right" step)
+        # Check if all required columns exist in the file
+        missing_cols = [col for col in REQUIRED_FEATURES if col not in df.columns]
+        
+        if missing_cols:
+            st.error(f"❌ Input file missing columns: {missing_cols}")
+            st.info(f"Please ensure your file has these exact headers: {REQUIRED_FEATURES}")
+            st.stop() # Stop execution until headers are fixed
+            
+        # 5. Prediction
+        st.sidebar.markdown("### 2. Run Prediction")
+        threshold = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.55)
+        
+        if st.button("Generate Predictions"):
+            # Engineer features using the validated dataframe
+            X = engineer_features(df)
+            
+            # Predict
+            df['win_probability'] = model.predict_proba(X[REQUIRED_FEATURES])[:, 1]
+            
+            # 6. Display Results
+            results = df[df['win_probability'] >= threshold].sort_values('win_probability', ascending=False)
+            
+            st.write(f"### Top Picks (Confidence > {threshold:.2f})")
+            
+            if not results.empty:
+                # Assuming you have columns like 'runner_horse' and 'race_course'
+                display_cols = [c for c in ['runner_horse', 'race_course', 'race_off_time', 'win_probability'] if c in results.columns]
+                results['win_probability'] = (results['win_probability'] * 100).round(1).astype(str) + '%'
+                st.dataframe(results[display_cols], use_container_width=True)
+                st.bar_chart(results.set_index('runner_horse')['win_probability'].str.replace('%', '').astype(float))
+            else:
+                st.info("No horses met the confidence threshold.")
+                
     except Exception as e:
-        st.sidebar.error(f"❌ File Processing Error: {e}")
-
-# ---------------------------------------------------------
-# PREDICTION & FILTERING (Only runs if data is loaded)
-# ---------------------------------------------------------
-if st.session_state['df'] is not None:
-    df = st.session_state['df'].copy()
-    
-    # ---------------------------------------------------------
-    # INVISIBLE DATA ALIGNMENT (Fixes feature engineering & model accuracy)
-    # ---------------------------------------------------------
-    rename_dict = {}
-    for col in df.columns:
-        normalized = str(col).strip().lower().replace(' ', '').replace('_', '')
-        if normalized in ['racecourse', 'course', 'track', 'venue', 'meeting']:
-            rename_dict[col] = 'race_course'
-        elif normalized in ['raceofftime', 'time', 'offtime', 'racetime', 'off']:
-            rename_dict[col] = 'race_off_time'
-        elif normalized in ['runnerhorse', 'horse', 'horsename', 'runner']:
-            rename_dict[col] = 'runner_horse'
-        elif normalized in ['or', 'officialrating', 'rating']:
-            rename_dict[col] = 'or'
-        elif normalized in ['wgt', 'weight']:
-            rename_dict[col] = 'wgt'
-        elif normalized in ['jockeywinrate', 'jockeywin%']:
-            rename_dict[col] = 'jockey_win_rate'
-        elif normalized in ['dayssincerun', 'dayssince']:
-            rename_dict[col] = 'days_since_run'
-            
-    # Remap headers to exact format expected by engineer_features() and the model
-    df = df.rename(columns=rename_dict)
-    
-    st.sidebar.markdown("### 2. Predict")
-    threshold = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.55)
-    
-    # Process and Predict for the whole file using aligned data
-    X = engineer_features(df)
-    features = ['or', 'wgt', 'jockey_win_rate', 'days_since_run']
-    df['win_probability'] = model.predict_proba(X[features])[:, 1]
-    
-    # Race Filters Setup
-    st.sidebar.markdown("---")
-    st.sidebar.header("Race Filters")
-    
-    COURSE_COL = 'race_course'
-    TIME_COL = 'race_off_time'
-    RUNNER_COL = 'runner_horse'
-    
-    # Course Filter
-    if COURSE_COL in df.columns:
-        courses = ["All Courses"] + sorted(df[COURSE_COL].dropna().unique().tolist())
-        selected_course = st.sidebar.selectbox("Select Course", courses)
-    else:
-        selected_course = "All Courses"
-
-    # Time Filter
-    if TIME_COL in df.columns:
-        if selected_course != "All Courses":
-            available_times = sorted(df[df[COURSE_COL] == selected_course][TIME_COL].dropna().unique().tolist())
-        else:
-            available_times = sorted(df[TIME_COL].dropna().unique().tolist())
-            
-        times = ["All Times"] + available_times
-        selected_time = st.sidebar.selectbox("Select Time", times)
-    else:
-        selected_time = "All Times"
-
-    # Filter Results
-    results = df[df['win_probability'] >= threshold]
-    if selected_course != "All Courses":
-        results = results[results[COURSE_COL] == selected_course]
-    if selected_time != "All Times":
-        results = results[results[TIME_COL] == selected_time]
-        
-    results = results.sort_values('win_probability', ascending=False)
-    
-    display_title = f"Predictions ({selected_course} at {selected_time})" 
-    if selected_course == "All Courses" and selected_time == "All Times":
-        display_title = "Overall Top Picks"
-        
-    st.write(f"### {display_title} (Confidence > {threshold:.2f})")
-    
-    display_cols = [RUNNER_COL, 'win_probability']
-    if COURSE_COL in df.columns: display_cols.insert(0, COURSE_COL)
-    if TIME_COL in df.columns: display_cols.insert(1, TIME_COL)
-    
-    if not results.empty:
-        rename_map = {
-            RUNNER_COL: 'Horse',
-            'win_probability': 'Win Probability',
-            COURSE_COL: 'Course',
-            TIME_COL: 'Time'
-        }
-        display_df = results[display_cols].rename(columns=rename_map)
-        display_df['Win Probability'] = (display_df['Win Probability'] * 100).round(1).astype(str) + '%'
-        
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
-        st.bar_chart(results.set_index(RUNNER_COL)['win_probability'])
-    else:
-        st.info("No horses met the confidence threshold for this specific race/course.")
-
+        st.error(f"An error occurred: {e}")
 else:
-    st.info("👈 Please upload a CSV or Excel file in the sidebar to begin.")
+    st.info("👈 Please upload a CSV or Excel file to get started.")
