@@ -1,6 +1,6 @@
 streamlit
 pandas
-xgboost== 3.3.0  <-- (Replace 2.0.3 with whatever number your computer showed)
+xgboost== 3.3.0
 scikit-learn
 plotly
 openpyxl
